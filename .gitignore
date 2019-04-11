@@ -1,0 +1,5 @@
+.idea/
+venv/
+__pycache__/
+draft.py
+draft2.py
