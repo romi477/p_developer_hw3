@@ -9,6 +9,8 @@ import hashlib
 import uuid
 from optparse import OptionParser
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import scoring
+
 
 SALT = "Otus"
 ADMIN_LOGIN = "admin"
@@ -67,13 +69,16 @@ class GenderField:
 class ClientIDsField:
     pass
 
+class Request:
+    pass
 
-class ClientsInterestsRequest:
+
+class ClientsInterestsRequest(Request):
     client_ids = ClientIDsField(required=True)
     date = DateField(required=False, nullable=True)
 
 
-class OnlineScoreRequest:
+class OnlineScoreRequest(Request):
     first_name = CharField(required=False, nullable=True)
     last_name = CharField(required=False, nullable=True)
     email = EmailField(required=False, nullable=True)
@@ -82,7 +87,7 @@ class OnlineScoreRequest:
     gender = GenderField(required=False, nullable=True)
 
 
-class MethodRequest:
+class MethodRequest(Request):
     account = CharField(required=False, nullable=True)
     login = CharField(required=True, nullable=True)
     token = CharField(required=True, nullable=True)
@@ -105,7 +110,16 @@ def check_auth(request):
 
 
 def method_handler(request, ctx, store):
-    response, code = None, None
+    handlers = {
+        'online_score': OnlineScoreRequest,
+        'clients_interests': ClientsInterestsRequest
+    }
+    method_recv = MethodRequest(request['body'])
+    # arguments = request['body']['arguments']
+
+    handler = handlers[method_recv.method]
+    response, code = handler.some_method(method_recv, ctx, store)
+
     return response, code
 
 
