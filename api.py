@@ -38,11 +38,30 @@ GENDERS = {
 }
 
 
-class CharField:
+class Store:
+    def __init__(self, cls):
+        self.cls = cls
+
+
+class Field:
+    def __init__(self, required=False, nullable=False):
+        self.required = required
+        self.nullable = nullable
+
+    def validate(self, value):
+        if self.required and value is None:
+            raise ValueError('This field is required.')
+        if not self.nullable and not value:
+            raise ValueError('This field cannot be empty.')
+
+
+
+
+class CharField(Field):
     pass
 
 
-class ArgumentsField:
+class ArgumentsField(Field):
     pass
 
 
@@ -50,32 +69,57 @@ class EmailField(CharField):
     pass
 
 
-class PhoneField:
+class PhoneField(Field):
     pass
 
 
-class DateField:
+class DateField(Field):
     pass
 
 
-class BirthDayField:
+class BirthDayField(Field):
     pass
 
 
-class GenderField:
+class GenderField(Field):
     pass
 
 
-class ClientIDsField:
+class ClientIDsField(Field):
     pass
 
-class Request:
-    pass
+
+class RequestMeta(type):
+    def __new__(mcls, name, bases, attrs):
+        fields = {}
+        new_attrs = {}
+        for key, value in attrs.items():
+            if isinstance(value, Field):
+                fields[key] = value
+            else:
+                new_attrs[key] = value
+        new_cls = super().__new__(mcls, name, bases, new_attrs)
+        # new_cls.store = Store(new_cls)
+        new_cls.fields_data = fields
+        return new_cls
+
+
+
+class Request(metaclass=RequestMeta):
+    def __init__(self, recv_data=None):
+        self.data = recv_data if recv_data else {}
+        self.errors = None
+
+    def is_valid(self):
+        return not self.errors
 
 
 class ClientsInterestsRequest(Request):
     client_ids = ClientIDsField(required=True)
     date = DateField(required=False, nullable=True)
+
+    def execute_request(self, request, context, store):
+        pass
 
 
 class OnlineScoreRequest(Request):
@@ -85,6 +129,9 @@ class OnlineScoreRequest(Request):
     phone = PhoneField(required=False, nullable=True)
     birthday = BirthDayField(required=False, nullable=True)
     gender = GenderField(required=False, nullable=True)
+
+    def execute_request(self, request, context, store):
+        pass
 
 
 class MethodRequest(Request):
@@ -115,10 +162,14 @@ def method_handler(request, ctx, store):
         'clients_interests': ClientsInterestsRequest
     }
     method_recv = MethodRequest(request['body'])
-    # arguments = request['body']['arguments']
 
-    handler = handlers[method_recv.method]
-    response, code = handler.some_method(method_recv, ctx, store)
+    if not method_recv.is_valid():
+        return method_recv.errors, INVALID_REQUEST
+    if not check_auth(method_recv):
+        return 'Forbidden', FORBIDDEN
+
+    handler = handlers[method_recv.method]()
+    response, code = handler.execute_request(method_recv.arguments, ctx, store)
 
     return response, code
 
