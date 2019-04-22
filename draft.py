@@ -52,10 +52,11 @@ class Field:
         self.required = required
         self.nullable = nullable
 
-    def validate(self, value):
-        if self.required and value is None:
+    def is_valid_field(self, value):
+        print('Init <Field> validate')
+        if self.required and not value:
             raise ValueError('This field is required.')
-        if not self.nullable and not value:
+        if not self.nullable and value:
             raise ValueError('This field cannot be empty.')
 
 
@@ -88,9 +89,10 @@ class GenderField(Field):
 
 
 class ClientIDsField(Field):
-    def validate(self, value):
-        super(ClientIDsField, self).validate(value)
-        print('Add my validate')
+    def is_valid_field(self, value):
+        print('Init <Child> validate')
+        super().is_valid_field(value)
+
 
 
 class RequestMeta(type):
@@ -109,19 +111,21 @@ class RequestMeta(type):
 
 
 class Request(metaclass=RequestMeta):
-    def __init__(self, arg):
+    def __init__(self, params={}):
 
-        for item in arg:
-            if item in self.fields_data:
-                setattr(self, item, arg.get(item))
+        # for item in params:
+        #     if item in self.fields_data:
+        #         setattr(self, item, params.get(item))
+        self.params = params
         self.errors = {}
+
 
 
 
     def is_valid(self):
         return not self.errors
 
-    def validate_fields(self):
+    def execute_validate_fields(self):
         pass
 
 
@@ -151,46 +155,49 @@ class MethodRequest(Request):
     token = CharField(required=True, nullable=True)
     arguments = ArgumentsField(required=True, nullable=True)
     method = CharField(required=True, nullable=False)
-    mydata = 42
+
 
     @property
     def is_admin(self):
         return self.login == ADMIN_LOGIN
 
-#
-# def check_auth(request):
-#     if request.is_admin:
-#         digest = hashlib.sha512(datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).hexdigest()
-#     else:
-#         digest = hashlib.sha512(request.account + request.login + SALT).hexdigest()
-#     if digest == request.token:
-#         return True
-#     return False
-#
 
-# def method_handler(request):
-#     handlers = {
-#         'online_score': OnlineScoreRequest,
-#         'clients_interests': ClientsInterestsRequest
-#     }
-#     method_recv = MethodRequest(request['method'])
-#
-#     if not method_recv.is_valid():
-#         return method_recv.errors, INVALID_REQUEST
-#     if not check_auth(method_recv):
-#         return 'Forbidden', FORBIDDEN
-#
-#     handler = handlers[method_recv.method]()
-#     response, code = handler.execute_request(method_recv.arguments)
-#
-#     return response, code
-#
-#
-# if __name__ == '__main__':
-#
+def check_auth(request):
+    if request.is_admin:
+        digest = hashlib.sha512(datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).hexdigest()
+    else:
+        digest = hashlib.sha512(request.account + request.login + SALT).hexdigest()
+    if digest == request.token:
+        return True
+    return False
 
-#
-#     method_handler(r)
+
+def execute_request(instance, request):
+    return 10, 20
+
+
+def method_handler(request):
+    models = {
+        'online_score': OnlineScoreRequest,
+        'clients_interests': ClientsInterestsRequest
+    }
+    method_recv = MethodRequest(request['method'])
+
+    if not method_recv.is_valid():
+        return method_recv.errors, INVALID_REQUEST
+    if not check_auth(method_recv):
+        return 'Forbidden', FORBIDDEN
+
+    model = models[method_recv.method]
+    arguments = method_recv.arguments
+    response, code = execute_request(model, arguments)
+
+    return response, code
+
+
+if __name__ == '__main__':
+
+    method_handler()
 
 
 
