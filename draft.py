@@ -46,6 +46,23 @@ class Store:
     def __init__(self, cls):
         self.cls = cls
 
+class FieldsContainer():
+    def __init__(self, fields):
+        self._fields = fields
+
+    def __repr__(self):
+        return '\n'.join([f'{k} - {v}' for k, v in self._fields.items()])
+
+    def get_field(self, key):
+        return self._fields.get(key, 'Not found field')
+
+    def has_field(self, field):
+        return field in self._fields
+
+
+
+
+
 
 class Field:
     def __init__(self, required=False, nullable=False):
@@ -106,19 +123,30 @@ class RequestMeta(type):
                 other_attrs[key] = value
         new_cls = super().__new__(mcls, name, bases, other_attrs)
         # new_cls.store = Store(new_cls)
-        new_cls.fields_data = fields
+        new_cls._fields_data = FieldsContainer(fields)
         return new_cls
 
 
 class Request(metaclass=RequestMeta):
     def __init__(self, params={}):
+        self.errors = {}
+        self.params = params
+
+        for field, value in params.items():
+            if self._fields_data.has_field(field):
+                setattr(self, field, value)
+
+        #     if key in self._fields_data and self._fields_data.get(key).is_valid_field(value):
+        #         setattr(self, key, value)
+        #     else:
+        #         self.errors[key] = f'<{value}> is not valid.'
+
+
+
 
         # for item in params:
         #     if item in self.fields_data:
         #         setattr(self, item, params.get(item))
-        self.params = params
-        self.errors = {}
-
 
 
 
@@ -194,10 +222,10 @@ def method_handler(request):
 
     return response, code
 
-
-if __name__ == '__main__':
-
-    method_handler()
-
+#
+# if __name__ == '__main__':
+#
+#     method_handler()
+#
 
 
