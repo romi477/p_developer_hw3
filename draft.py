@@ -85,24 +85,23 @@ r6 = {
     "arguments": {"client_ids": [1, 2, 3, 4], "date": "20.07.2017"}
 }
 
-class Store:
-    def __init__(self, cls):
-        self.cls = cls
+args1 = {
+    "phone": "79175002040",
+    "email": "stupnikov@otus.ru",
+    "first_name": "Stas",
+    "last_name": "Stupnikov",
+    "birthday": "01.01.1990",
+    "gender": 1
+}
 
-
-class FieldsContainer:
-    def __init__(self, fields):
-        self._fields = fields
-
-    # def __repr__(self):
-    #     return '\n'.join([f'{k} - {v}' for k, v in self._fields.items()])
-    #
-    # def get_field(self, key):
-    #     return self._fields.get(key, 'Not found field')
-    #
-    # def has_field(self, field):
-    #     return field in self._fields
-
+args2 = {
+    "phone": "79175002040",
+    "email": "stupnikov@otus.ru",
+    "first_name": "Stas",
+    "last_name": "Stupnikov",
+    "birthday": "01.01.1990",
+    "gender": 1
+}
 
 
 
@@ -113,7 +112,7 @@ class Field:
 
     def is_valid_field(self, value):
         print('Init <Field> validate')
-
+        return True
 
 class CharField(Field):
     pass
@@ -144,10 +143,9 @@ class GenderField(Field):
 
 
 class ClientIDsField(Field):
-    def is_valid_field(self, value):
+    def is_valid_field(self):
         print('Init <Child> validate')
-        super().is_valid_field(value)
-
+        super().is_valid_field()
 
 
 class RequestMeta(type):
@@ -160,19 +158,21 @@ class RequestMeta(type):
             else:
                 other_attrs[key] = value
         new_cls = super().__new__(cls, name, bases, other_attrs)
-        # new_cls.store = Store(new_cls)
-        new_cls._fields_container = FieldsContainer(field_instances)
+        new_cls._fields_container = field_instances
         return new_cls
 
 
 class Request(metaclass=RequestMeta):
     def __init__(self, params):
-        self.errors = {}
         self.params = params
-        self._clean_fields = []
+        self.errors = {}
+        self._model_fields = []
 
-        for field_name, field_instance in self._fields_container._fields.items():
+
+    def validate_request(self):
+        for field_name, field_instance in self._fields_container.items():
             params_value = self.params.get(field_name)
+
             if field_instance.required and field_name not in self.params:
                 print(f'{field_name} - required BAD!')
                 print('skip checking nullable')
@@ -184,23 +184,24 @@ class Request(metaclass=RequestMeta):
                     self.errors[field_name] = 'This field cannot be empty.'
                 else:
                     print(f'{field_name} - nullable OK!')
-                    setattr(self, field_name, field_instance)
-                    self._clean_fields.append(field_name)
 
+                    if field_instance.is_valid_field(params_value):
+                        setattr(self, field_name, params_value)
+                        self._model_fields.append(field_name)
+                    else:
+                        self.errors[field_name] = 'Is not valid!'
+
+
+    def __repr__(self):
+        return '\n'.join(self._model_fields)
 
     def is_valid(self):
         return not self.errors
-
-    def execute_validate_fields(self):
-        pass
 
 
 class ClientsInterestsRequest(Request):
     client_ids = ClientIDsField(required=True)
     date = DateField(required=False, nullable=True)
-
-    def execute_request(self, request, context, store):
-        pass
 
 
 class OnlineScoreRequest(Request):
@@ -210,9 +211,6 @@ class OnlineScoreRequest(Request):
     phone = PhoneField(required=False, nullable=True)
     birthday = BirthDayField(required=False, nullable=True)
     gender = GenderField(required=False, nullable=True)
-
-    def execute_request(self, request, context, store):
-        pass
 
 
 class MethodRequest(Request):
@@ -237,17 +235,29 @@ def check_auth(request):
     return False
 
 
-def execute_request(model, request):
-    data_instance = model(request)
-    if not data_instance.is_valid():
-        return data_instance.errors, INVALID_REQUEST
+def online_score_handler(model, arguments):
+    errors = {}
+    model_instance = model(arguments)
+    if not model_instance.is_valid():
+        return model_instance.errors, INVALID_REQUEST
+    for field_name in model_instance._model_fields:
+        if not model_instance.__dict__[field_name].is_valid_field():
+            errors[field_name] = 'Not valid!'
+
+
+    return model_instance
+
+
+def clients_interests_handler(model, arguments):
+    pass
 
 
 def method_handler(request):
-    models = {
-        'online_score': OnlineScoreRequest,
-        'clients_interests': ClientsInterestsRequest
+    handlers = {
+        'online_score': (online_score_handler, OnlineScoreRequest),
+        'clients_interests': (clients_interests_handler, ClientsInterestsRequest)
     }
+
     method_recv = MethodRequest(request['method'])
 
     if not method_recv.is_valid():
@@ -255,16 +265,10 @@ def method_handler(request):
     if not check_auth(method_recv):
         return 'Forbidden', FORBIDDEN
 
-    model = models[method_recv.method]
-    arguments = method_recv.arguments
-    response, code = execute_request(model, arguments)
+    handler, model = handlers[method_recv.method]
+
+    response, code = handler(model, method_recv.arguments)
 
     return response, code
-
-#
-# if __name__ == '__main__':
-#
-#     method_handler()
-#
 
 
