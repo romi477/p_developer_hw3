@@ -116,12 +116,14 @@ class Field:
 
     def validate(self, value):
         if self.required and not value:
-            raise ValueError('This field is required.')
+            raise ValueError('This field is required!')
 
         if not self.nullable and not value:
-            raise ValueError('This field cannot be empty.')
+            raise ValueError('This field cannot be empty!')
 
         self.validate_field(value)
+
+        return value
 
 
 class CharField(Field):
@@ -206,16 +208,20 @@ class Request(metaclass=RequestMeta):
         self.params = params
         self.errors = {}
         self._model_fields = []
+        self.cleaned_data = {}
 
 
     def validate_request(self):
         for field_name, field_instance in self._fields_container.items():
             params_value = self.params.get(field_name)
             try:
-                field_instance.validate(params_value)
+                clean_value = field_instance.validate(params_value)
             except Exception as ex:
                 self.errors[field_name] = ex
+            else:
+                self.cleaned_data[field_name] = clean_value
 
+        return self.cleaned_data
 
     def __repr__(self):
         return '\n'.join(self._model_fields)
@@ -260,41 +266,54 @@ def check_auth(request):
     return False
 
 
-def online_score_handler(model, arguments):
-    errors = {}
-    model_instance = model(arguments)
-    model_instance.validate_request()
-    if not model_instance.is_valid():
-        return model_instance.errors, INVALID_REQUEST
-    for field_name in model_instance._model_fields:
-        if not model_instance.__dict__[field_name].is_valid_field():
-            errors[field_name] = 'Not valid!'
+class OnlineScoreHandler:
+    clean_dict = {}
 
-    return model_instance
+    def execute_request(self, model, arguments, context, store):
+        model_instance = model(arguments)
+        self.clean_dict = model_instance.validate_request()
+
+        if not model_instance.is_valid():
+            return INVALID_REQUEST, model_instance.errors
+
+        if not self.check_non_empty_pairs(self.clean_dict):
+            return INVALID_REQUEST, {k: v for k, v in self.clean_dict.items() if not v}
+
+        context['has'] = [k for k, v in self.clean_dict.items() if v]
+
+    @staticmethod
+    def check_non_empty_pairs(d):
+        if d.get('phone') and d.get('email') or \
+                d.get('first_name') and d.get('last_name') or \
+                d.get('gender') and d.get('birthday'):
+            return d
 
 
-def clients_interests_handler(model, arguments):
+
+
+
+def ClientsInterestsHandler(model, arguments):
     pass
 
 
-def method_handler(request):
+def method_handler(request, context, store):
     handlers = {
-        'online_score': (online_score_handler, OnlineScoreRequest),
-        'clients_interests': (clients_interests_handler, ClientsInterestsRequest)
+        'online_score': (OnlineScoreHandler, OnlineScoreRequest),
+        'clients_interests': (ClientsInterestsHandler, ClientsInterestsRequest)
     }
 
     method_recv = MethodRequest(request['method'])
 
     method_recv.validate_request()
     if not method_recv.is_valid():
-        return method_recv.errors, INVALID_REQUEST
+        return INVALID_REQUEST, method_recv.errors
     if not check_auth(method_recv):
-        return 'Forbidden', FORBIDDEN
+        return FORBIDDEN, 'Forbidden'
 
     handler, model = handlers[method_recv.method]
 
-    response, code = handler(model, method_recv.arguments)
+    code, response = handler().execute_request(model, method_recv.arguments, context, store)
 
-    return response, code
+    return code, response
 
 
