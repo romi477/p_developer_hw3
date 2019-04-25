@@ -7,6 +7,7 @@ import uuid
 from optparse import OptionParser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import scoring
+from datetime import datetime
 
 
 SALT = "Otus"
@@ -44,10 +45,10 @@ r1 = {
 
 r2 = {
     "account2": "horns&hoofs",
-    "login": "admin",
-    "method": "clients_interests",
+    "login2": "admin",
+    "method": 123,
     "token": "d3573aff1555cd67dccf21b95fe8c4dc8732f33fd4e32461b7fe6a71d83c947688515e36774c00fb630b039fe2223c991f045f13f2",
-    "arguments": {"client_ids": [1, 2, 3, 4], "date": "20.07.2017"}
+    "arguments": ["client_ids", [1, 2, 3, 4], "date", "20.07.2017"]
 }
 
 
@@ -104,48 +105,86 @@ args2 = {
 }
 
 
-
 class Field:
     def __init__(self, required=False, nullable=False):
         self.required = required
         self.nullable = nullable
+        self.field_errors = {}
 
-    def is_valid_field(self, value):
-        print('Init <Field> validate')
-        return True
+    def validate_field(self, value):
+        raise NotImplementedError('Not implemented self.is_valid_field() method')
+
+    def validate(self, value):
+        if self.required and not value:
+            raise ValueError('This field is required.')
+
+        if not self.nullable and not value:
+            raise ValueError('This field cannot be empty.')
+
+        self.validate_field(value)
+
 
 class CharField(Field):
-    pass
+    def validate_field(self, value):
+        if value is not None and not isinstance(value, str):
+            raise TypeError('"CharField" must be <str>!')
 
 
 class ArgumentsField(Field):
-    pass
+    def validate_field(self, value):
+        if value is not None and not isinstance(value, dict):
+            raise TypeError('"ArgumentsField" must be <dict>!')
 
 
 class EmailField(CharField):
-    pass
+    def validate_field(self, value):
+        super().validate_field(value)
+        if '@' not in value:
+            raise ValueError('"EmailField" has incorrect value!')
 
 
 class PhoneField(Field):
-    pass
+    def validate_field(self, value):
+        if not isinstance(value, str) or not isinstance(value, int):
+            raise TypeError('"PhoneField" must be <int> or <str>' )
+
+        if not str(value).startswith('7') and not len(str(value)) != 11:
+            raise ValueError('"PhoneField" has incorrect value!')
 
 
 class DateField(Field):
-    pass
+    def validate_field(self, value):
+        try:
+            self.parse_date = datetime.strptime(value, '%d.%m.%Y')
+        except Exception:
+            raise
 
 
-class BirthDayField(Field):
-    pass
-
-
+class BirthDayField(DateField, Field):
+    def validate_field(self, value):
+        super().validate_field(value)
+        delta = datetime.now() - self.parse_date
+        if delta.days / 365 > 70:
+            raise ValueError('Age limit up to 70 years!')
+        
+        
 class GenderField(Field):
-    pass
+    def validate_field(self, value):
+        if value not in [0, 1, 2]:
+            raise ValueError('"GenderField" has incorrect value!')
 
 
 class ClientIDsField(Field):
-    def is_valid_field(self):
-        print('Init <Child> validate')
-        super().is_valid_field()
+    def validate_field(self, value):
+        if not isinstance(value, list):
+            raise TypeError('"ClientIDsField" must be <list>!')
+        self.validate_array(value)
+
+    @staticmethod
+    def validate_array(array):
+        for value in array:
+            if not isinstance(value, int) or value < 0:
+                raise ValueError('"ClientIDsField" has invalid data array!')
 
 
 class RequestMeta(type):
@@ -172,24 +211,10 @@ class Request(metaclass=RequestMeta):
     def validate_request(self):
         for field_name, field_instance in self._fields_container.items():
             params_value = self.params.get(field_name)
-
-            if field_instance.required and field_name not in self.params:
-                print(f'{field_name} - required BAD!')
-                print('skip checking nullable')
-                self.errors[field_name] = 'This field is required.'
-            else:
-                print(f'{field_name} - required OK!')
-                if not field_instance.nullable and not params_value:
-                    print(f'{field_name} - nullable BAD!')
-                    self.errors[field_name] = 'This field cannot be empty.'
-                else:
-                    print(f'{field_name} - nullable OK!')
-
-                    if field_instance.is_valid_field(params_value):
-                        setattr(self, field_name, params_value)
-                        self._model_fields.append(field_name)
-                    else:
-                        self.errors[field_name] = 'Is not valid!'
+            try:
+                field_instance.validate(params_value)
+            except Exception as ex:
+                self.errors[field_name] = ex
 
 
     def __repr__(self):
@@ -238,12 +263,12 @@ def check_auth(request):
 def online_score_handler(model, arguments):
     errors = {}
     model_instance = model(arguments)
+    model_instance.validate_request()
     if not model_instance.is_valid():
         return model_instance.errors, INVALID_REQUEST
     for field_name in model_instance._model_fields:
         if not model_instance.__dict__[field_name].is_valid_field():
             errors[field_name] = 'Not valid!'
-
 
     return model_instance
 
@@ -260,6 +285,7 @@ def method_handler(request):
 
     method_recv = MethodRequest(request['method'])
 
+    method_recv.validate_request()
     if not method_recv.is_valid():
         return method_recv.errors, INVALID_REQUEST
     if not check_auth(method_recv):

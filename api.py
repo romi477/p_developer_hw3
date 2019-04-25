@@ -55,8 +55,6 @@ class Field:
             raise ValueError('This field cannot be empty.')
 
 
-
-
 class CharField(Field):
     pass
 
