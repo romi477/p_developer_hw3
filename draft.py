@@ -155,6 +155,10 @@ class PhoneField(Field):
 
 
 class DateField(Field):
+    def __init__(self, required=False, nullable=False):
+        super().__init__(required, nullable)
+        self.parse_date = None
+
     def validate_field(self, value):
         try:
             self.parse_date = datetime.strptime(value, '%d.%m.%Y')
@@ -172,7 +176,7 @@ class BirthDayField(DateField, Field):
         
 class GenderField(Field):
     def validate_field(self, value):
-        if value not in [0, 1, 2]:
+        if value not in [UNKNOWN, MALE, FEMALE]:
             raise ValueError('"GenderField" has incorrect value!')
 
 
@@ -207,8 +211,8 @@ class Request(metaclass=RequestMeta):
     def __init__(self, params):
         self.params = params
         self.errors = {}
-        self._model_fields = []
         self.cleaned_data = {}
+        self._model_fields = []
 
 
     def validate_request(self):
@@ -220,7 +224,6 @@ class Request(metaclass=RequestMeta):
                 self.errors[field_name] = ex
             else:
                 self.cleaned_data[field_name] = clean_value
-
         return self.cleaned_data
 
     def __repr__(self):
@@ -280,6 +283,18 @@ class OnlineScoreHandler:
             return INVALID_REQUEST, {k: v for k, v in self.clean_dict.items() if not v}
 
         context['has'] = [k for k, v in self.clean_dict.items() if v]
+        
+        scores = scoring.get_score(
+            store,
+            self.clean_dict.get('phone'),
+            self.clean_dict.get('email'),
+            self.clean_dict.get('birthday'),
+            self.clean_dict.get('gender'),
+            self.clean_dict.get('first_name'),
+            self.clean_dict.get('last_name'),
+        )
+        return OK, scores
+
 
     @staticmethod
     def check_non_empty_pairs(d):
@@ -287,9 +302,6 @@ class OnlineScoreHandler:
                 d.get('first_name') and d.get('last_name') or \
                 d.get('gender') and d.get('birthday'):
             return d
-
-
-
 
 
 def ClientsInterestsHandler(model, arguments):
@@ -310,10 +322,12 @@ def method_handler(request, context, store):
     if not check_auth(method_recv):
         return FORBIDDEN, 'Forbidden'
 
+    is_admin = method_recv.is_admin
+
     handler, model = handlers[method_recv.method]
 
     code, response = handler().execute_request(model, method_recv.arguments, context, store)
-
+    
     return code, response
 
 

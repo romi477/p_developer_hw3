@@ -38,76 +38,130 @@ GENDERS = {
 }
 
 
-class Store:
-    def __init__(self, cls):
-        self.cls = cls
-
-
 class Field:
     def __init__(self, required=False, nullable=False):
         self.required = required
         self.nullable = nullable
-
+        self.field_errors = {}
+    
+    def validate_field(self, value):
+        raise NotImplementedError('Not implemented self.is_valid_field() method')
+    
     def validate(self, value):
-        if self.required and value is None:
-            raise ValueError('This field is required.')
+        if self.required and not value:
+            raise ValueError('This field is required!')
+        
         if not self.nullable and not value:
-            raise ValueError('This field cannot be empty.')
+            raise ValueError('This field cannot be empty!')
+        
+        self.validate_field(value)
+        
+        return value
 
 
 class CharField(Field):
-    pass
+    def validate_field(self, value):
+        if value is not None and not isinstance(value, str):
+            raise TypeError('"CharField" must be <str>!')
 
 
 class ArgumentsField(Field):
-    pass
+    def validate_field(self, value):
+        if value is not None and not isinstance(value, dict):
+            raise TypeError('"ArgumentsField" must be <dict>!')
 
 
 class EmailField(CharField):
-    pass
+    def validate_field(self, value):
+        super().validate_field(value)
+        if '@' not in value:
+            raise ValueError('"EmailField" has incorrect value!')
 
 
 class PhoneField(Field):
-    pass
+    def validate_field(self, value):
+        if not isinstance(value, str) and not isinstance(value, int):
+            raise TypeError('"PhoneField" must be <int> or <str>')
+        
+        if not str(value).startswith('7') and not len(str(value)) != 11:
+            raise ValueError('"PhoneField" has incorrect value!')
 
 
 class DateField(Field):
-    pass
+    def __init__(self, required=False, nullable=False):
+        super().__init__(required, nullable)
+        self.parse_date = None
+    
+    def validate_field(self, value):
+        try:
+            self.parse_date = datetime.datetime.strptime(value, '%d.%m.%Y')
+        except Exception:
+            raise
 
 
-class BirthDayField(Field):
-    pass
+class BirthDayField(DateField, Field):
+    def validate_field(self, value):
+        super().validate_field(value)
+        delta = datetime.datetime.now() - self.parse_date
+        if delta.days / 365 > 70:
+            raise ValueError('Age limit up to 70 years!')
 
 
 class GenderField(Field):
-    pass
+    def validate_field(self, value):
+        if value not in [UNKNOWN, MALE, FEMALE]:
+            raise ValueError('"GenderField" has incorrect value!')
 
 
 class ClientIDsField(Field):
-    pass
+    def validate_field(self, value):
+        if not isinstance(value, list):
+            raise TypeError('"ClientIDsField" must be <list>!')
+        self.validate_array(value)
+    
+    @staticmethod
+    def validate_array(array):
+        for value in array:
+            if not isinstance(value, int) or value < 0:
+                raise ValueError('"ClientIDsField" has invalid data array!')
 
 
 class RequestMeta(type):
-    def __new__(mcls, name, bases, attrs):
-        fields = {}
-        new_attrs = {}
+    def __new__(cls, name, bases, attrs):
+        field_instances = {}
+        other_attrs = {}
         for key, value in attrs.items():
             if isinstance(value, Field):
-                fields[key] = value
+                field_instances[key] = value
             else:
-                new_attrs[key] = value
-        new_cls = super().__new__(mcls, name, bases, new_attrs)
-        # new_cls.store = Store(new_cls)
-        new_cls.fields_data = fields
+                other_attrs[key] = value
+        new_cls = super().__new__(cls, name, bases, other_attrs)
+        new_cls._fields_container = field_instances
         return new_cls
 
 
-
 class Request(metaclass=RequestMeta):
-    def __init__(self, recv_data=None):
-        self.data = recv_data if recv_data else {}
-        self.errors = None
-
+    def __init__(self, params):
+        self.params = params
+        self.errors = {}
+        self.cleaned_data = {}
+        self._model_fields = []
+    
+    def validate_request(self):
+        for field_name, field_instance in self._fields_container.items():
+            params_value = self.params.get(field_name)
+            try:
+                clean_value = field_instance.validate(params_value)
+            except Exception as ex:
+                self.errors[field_name] = ex
+            else:
+                self.cleaned_data[field_name] = clean_value
+                setattr(self, field_name, clean_value)
+        return self.cleaned_data
+    
+    def __repr__(self):
+        return '\n'.join(self._model_fields)
+    
     def is_valid(self):
         return not self.errors
 
@@ -115,9 +169,6 @@ class Request(metaclass=RequestMeta):
 class ClientsInterestsRequest(Request):
     client_ids = ClientIDsField(required=True)
     date = DateField(required=False, nullable=True)
-
-    def execute_request(self, request, context, store):
-        pass
 
 
 class OnlineScoreRequest(Request):
@@ -127,9 +178,6 @@ class OnlineScoreRequest(Request):
     phone = PhoneField(required=False, nullable=True)
     birthday = BirthDayField(required=False, nullable=True)
     gender = GenderField(required=False, nullable=True)
-
-    def execute_request(self, request, context, store):
-        pass
 
 
 class MethodRequest(Request):
@@ -146,30 +194,73 @@ class MethodRequest(Request):
 
 def check_auth(request):
     if request.is_admin:
-        digest = hashlib.sha512(datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).hexdigest()
+        digest = hashlib.sha512((datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).encode(encoding='utf_8')).hexdigest()
     else:
-        digest = hashlib.sha512(request.account + request.login + SALT).hexdigest()
+        digest = hashlib.sha512((request.account + request.login + SALT).encode(encoding='utf_8')).hexdigest()
+    print('digest:', digest)
     if digest == request.token:
         return True
     return False
 
 
-def method_handler(request, ctx, store):
+class OnlineScoreHandler:
+    clean_dict = {}
+    
+    def execute_request(self, model, arguments, context, store):
+        model_instance = model(arguments)
+        self.clean_dict = model_instance.validate_request()
+        
+        if not model_instance.is_valid():
+            return INVALID_REQUEST, model_instance.errors
+        
+        if not self.check_non_empty_pairs(self.clean_dict):
+            return INVALID_REQUEST, {k: v for k, v in self.clean_dict.items() if not v}
+        
+        context['has'] = [k for k, v in self.clean_dict.items() if v]
+        
+        scores = scoring.get_score(
+            store,
+            self.clean_dict.get('phone'),
+            self.clean_dict.get('email'),
+            self.clean_dict.get('birthday'),
+            self.clean_dict.get('gender'),
+            self.clean_dict.get('first_name'),
+            self.clean_dict.get('last_name'),
+        )
+        return OK, scores
+    
+    @staticmethod
+    def check_non_empty_pairs(d):
+        if d.get('phone') and d.get('email') or \
+                d.get('first_name') and d.get('last_name') or \
+                d.get('gender') and d.get('birthday'):
+            return d
+
+def ClientsInterestsHandler(model, arguments):
+    pass
+
+
+def method_handler(request, context, store):
     handlers = {
-        'online_score': OnlineScoreRequest,
-        'clients_interests': ClientsInterestsRequest
+        'online_score': (OnlineScoreHandler, OnlineScoreRequest),
+        'clients_interests': (ClientsInterestsHandler, ClientsInterestsRequest)
     }
+    
     method_recv = MethodRequest(request['body'])
-
+    
+    method_recv.validate_request()
     if not method_recv.is_valid():
-        return method_recv.errors, INVALID_REQUEST
+        return INVALID_REQUEST, method_recv.errors
     if not check_auth(method_recv):
-        return 'Forbidden', FORBIDDEN
-
-    handler = handlers[method_recv.method]()
-    response, code = handler.execute_request(method_recv.arguments, ctx, store)
-
-    return response, code
+        return FORBIDDEN, 'Forbidden'
+    
+    is_admin = method_recv.is_admin
+    
+    handler, model = handlers[method_recv.method]
+    
+    code, response = handler().execute_request(model, method_recv.arguments, context, store)
+    
+    return code, response
 
 
 class MainHTTPHandler(BaseHTTPRequestHandler):
@@ -196,7 +287,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             logging.info("%s: %s %s" % (self.path, data_string, context["request_id"]))
             if path in self.router:
                 try:
-                    response, code = self.router[path]({"body": request, "headers": self.headers}, context, self.store)
+                    code, response = self.router[path]({"body": request, "headers": self.headers}, context, self.store)
                 except Exception as e:
                     logging.exception(f"Unexpected error: %s" % e)
                     code = INTERNAL_ERROR
@@ -212,7 +303,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             r = {"error": response or ERRORS.get(code, "Unknown Error"), "code": code}
         context.update(r)
         logging.info(context)
-        self.wfile.write(json.dumps(r))
+        self.wfile.write(json.dumps(r).encode(encoding='utf_8'))
         return
 
 
