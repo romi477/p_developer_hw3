@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import abc
 import json
 import datetime
 import logging
@@ -31,6 +30,7 @@ ERRORS = {
 UNKNOWN = 0
 MALE = 1
 FEMALE = 2
+
 GENDERS = {
     UNKNOWN: "unknown",
     MALE: "male",
@@ -42,10 +42,9 @@ class Field:
     def __init__(self, required=False, nullable=False):
         self.required = required
         self.nullable = nullable
-        self.field_errors = {}
-    
+
     def validate_field(self, value):
-        raise NotImplementedError('Not implemented self.is_valid_field() method')
+        raise NotImplementedError('Not implemented <is_valid_field()> method')
     
     def validate(self, value):
         if self.required and not value:
@@ -53,7 +52,10 @@ class Field:
         
         if not self.nullable and not value:
             raise ValueError('This field cannot be empty!')
-        
+
+        if value is None or value == '':
+            return value
+
         self.validate_field(value)
         
         return value
@@ -61,7 +63,7 @@ class Field:
 
 class CharField(Field):
     def validate_field(self, value):
-        if value is not None and not isinstance(value, str):
+        if not isinstance(value, str):
             raise TypeError('"CharField" must be <str>!')
 
 
@@ -88,8 +90,8 @@ class PhoneField(Field):
 
 
 class DateField(Field):
-    def __init__(self, required=False, nullable=False):
-        super().__init__(required, nullable)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.parse_date = None
     
     def validate_field(self, value):
@@ -143,10 +145,9 @@ class RequestMeta(type):
 class Request(metaclass=RequestMeta):
     def __init__(self, params):
         self.params = params
-        self.errors = {}
         self.cleaned_data = {}
-        self._model_fields = []
-    
+        self.errors = {}
+
     def validate_request(self):
         for field_name, field_instance in self._fields_container.items():
             params_value = self.params.get(field_name)
@@ -157,13 +158,15 @@ class Request(metaclass=RequestMeta):
             else:
                 self.cleaned_data[field_name] = clean_value
                 setattr(self, field_name, clean_value)
-        return self.cleaned_data
-    
-    def __repr__(self):
-        return '\n'.join(self._model_fields)
-    
+
     def is_valid(self):
         return not self.errors
+
+    @classmethod
+    def data_init(cls, *args, **kwargs):
+        class_instance = cls(*args, **kwargs)
+        class_instance.validate_request()
+        return class_instance
 
 
 class ClientsInterestsRequest(Request):
@@ -204,61 +207,74 @@ def check_auth(request):
 
 
 class OnlineScoreHandler:
-    clean_dict = {}
-    
-    def execute_request(self, model, arguments, context, store):
-        model_instance = model(arguments)
-        self.clean_dict = model_instance.validate_request()
+
+    def execute_request(self, arguments, context, store):
+        post_method = OnlineScoreRequest.data_init(arguments)
+
+        if not post_method.is_valid():
+            return INVALID_REQUEST, post_method.errors
+
+        clean_dict = post_method.cleaned_data
+        if not self.check_non_empty_pairs(clean_dict):
+            return INVALID_REQUEST, {k: 'null' for k, v in clean_dict.items() if not v}
         
-        if not model_instance.is_valid():
-            return INVALID_REQUEST, model_instance.errors
-        
-        if not self.check_non_empty_pairs(self.clean_dict):
-            return INVALID_REQUEST, {k: v for k, v in self.clean_dict.items() if not v}
-        
-        context['has'] = [k for k, v in self.clean_dict.items() if v]
+        context['has'] = [k for k, v in clean_dict.items() if v]
         
         scores = scoring.get_score(
             store,
-            self.clean_dict.get('phone'),
-            self.clean_dict.get('email'),
-            self.clean_dict.get('birthday'),
-            self.clean_dict.get('gender'),
-            self.clean_dict.get('first_name'),
-            self.clean_dict.get('last_name'),
+            clean_dict.get('phone'),
+            clean_dict.get('email'),
+            clean_dict.get('birthday'),
+            clean_dict.get('gender'),
+            clean_dict.get('first_name'),
+            clean_dict.get('last_name'),
         )
+
+        if context.get('is_admin'):
+            return OK, 42
         return OK, scores
-    
-    @staticmethod
-    def check_non_empty_pairs(d):
+
+    def check_non_empty_pairs(self, d):
         if d.get('phone') and d.get('email') or \
                 d.get('first_name') and d.get('last_name') or \
                 d.get('gender') and d.get('birthday'):
             return d
 
-def ClientsInterestsHandler(model, arguments):
-    pass
+
+class ClientsInterestsHandler:
+
+    def execute_request(self, arguments, context, store):
+        post_method = ClientsInterestsRequest.data_init(arguments)
+
+        if not post_method.is_valid():
+            return INVALID_REQUEST, post_method.errors
+
+        context['nclients'] = len(post_method.client_ids)
+
+        interests_dict = {k: scoring.get_interests(store, k) for k in post_method.client_ids}
+
+        return OK, interests_dict
 
 
 def method_handler(request, context, store):
     handlers = {
-        'online_score': (OnlineScoreHandler, OnlineScoreRequest),
-        'clients_interests': (ClientsInterestsHandler, ClientsInterestsRequest)
+        'online_score': OnlineScoreHandler,
+        'clients_interests': ClientsInterestsHandler
     }
     
-    method_recv = MethodRequest(request['body'])
+    post_ = MethodRequest.data_init(request['body'])
     
-    method_recv.validate_request()
-    if not method_recv.is_valid():
-        return INVALID_REQUEST, method_recv.errors
-    if not check_auth(method_recv):
-        return FORBIDDEN, 'Forbidden'
+    if not post_.is_valid():
+        return INVALID_REQUEST, post_.errors
+
+    if not check_auth(post_):
+        return FORBIDDEN, 'Forbidden!'
     
-    is_admin = method_recv.is_admin
+    context['is_admin'] = post_.is_admin
     
-    handler, model = handlers[method_recv.method]
+    handler = handlers[post_.method]
     
-    code, response = handler().execute_request(model, method_recv.arguments, context, store)
+    code, response = handler().execute_request(post_.arguments, context, store)
     
     return code, response
 

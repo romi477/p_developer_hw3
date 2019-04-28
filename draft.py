@@ -104,6 +104,14 @@ args2 = {
     "gender": 1
 }
 
+"""
+curl -X POST -H "Content-Type: application/json" -d login": "admin","method":"online_score", 
+"token": "9ed87b8ed8fc389e088c5c8c2fe8ede72bba911072445bb7e19993c2ed65ca1e8c031700aa754a3395b3c5d6ab87e37e829106fa56132f9d333c0dbad8ef8bff", 
+"arguments": {"phone": "79175002040", "email": "stupnikov@otus.ru", "first_name": "Стансилав", "last_name": "Ступников", "birthday": "01.01.1990", "gender": 1}}' http://127.0.0.1:8080/method/
+
+"""
+
+
 
 class Field:
     def __init__(self, required=False, nullable=False):
@@ -155,8 +163,8 @@ class PhoneField(Field):
 
 
 class DateField(Field):
-    def __init__(self, required=False, nullable=False):
-        super().__init__(required, nullable)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.parse_date = None
 
     def validate_field(self, value):
@@ -226,8 +234,8 @@ class Request(metaclass=RequestMeta):
                 self.cleaned_data[field_name] = clean_value
         return self.cleaned_data
 
-    def __repr__(self):
-        return '\n'.join(self._model_fields)
+    # def __repr__(self):
+    #     return '\n'.join(self._model_fields)
 
     def is_valid(self):
         return not self.errors
