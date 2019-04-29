@@ -47,14 +47,11 @@ class Field:
         raise NotImplementedError('Not implemented <is_valid_field()> method')
     
     def validate(self, value):
-        if self.required and not value:
+        if self.required and value is None:
             raise ValueError('This field is required!')
         
-        if not self.nullable and not value:
+        if not self.nullable and value == '':
             raise ValueError('This field cannot be empty!')
-
-        if value is None or value == '':
-            return value
 
         self.validate_field(value)
         
@@ -63,6 +60,7 @@ class Field:
 
 class CharField(Field):
     def validate_field(self, value):
+  
         if not isinstance(value, str):
             raise TypeError('"CharField" must be <str>!')
 
@@ -155,6 +153,8 @@ class Request(metaclass=RequestMeta):
                 clean_value = field_instance.validate(params_value)
             except Exception as ex:
                 self.errors[field_name] = ex
+                logging.error(field_name)
+                logging.error(ex)
             else:
                 self.cleaned_data[field_name] = clean_value
                 setattr(self, field_name, clean_value)
@@ -212,11 +212,11 @@ class OnlineScoreHandler:
         post_method = OnlineScoreRequest.data_init(arguments)
 
         if not post_method.is_valid():
-            return INVALID_REQUEST, post_method.errors
+            return post_method.errors, INVALID_REQUEST
 
         clean_dict = post_method.cleaned_data
         if not self.check_non_empty_pairs(clean_dict):
-            return INVALID_REQUEST, {k: 'null' for k, v in clean_dict.items() if not v}
+            return {k: 'null' for k, v in clean_dict.items() if not v}, INVALID_REQUEST
         
         context['has'] = [k for k, v in clean_dict.items() if v]
         
@@ -231,8 +231,8 @@ class OnlineScoreHandler:
         )
 
         if context.get('is_admin'):
-            return OK, 42
-        return OK, scores
+            return 42, OK
+        return scores, OK
 
     def check_non_empty_pairs(self, d):
         if d.get('phone') and d.get('email') or \
@@ -247,13 +247,13 @@ class ClientsInterestsHandler:
         post_method = ClientsInterestsRequest.data_init(arguments)
 
         if not post_method.is_valid():
-            return INVALID_REQUEST, post_method.errors
+            return post_method.errors, INVALID_REQUEST
 
         context['nclients'] = len(post_method.client_ids)
 
         interests_dict = {k: scoring.get_interests(store, k) for k in post_method.client_ids}
 
-        return OK, interests_dict
+        return interests_dict, OK
 
 
 def method_handler(request, context, store):
@@ -265,18 +265,19 @@ def method_handler(request, context, store):
     post_ = MethodRequest.data_init(request['body'])
     
     if not post_.is_valid():
-        return INVALID_REQUEST, post_.errors
+        return post_.errors, INVALID_REQUEST
+    
+    handler = handlers.get(post_.method)
+    
+    if not handler:
+        return 'Invalid request method!', INVALID_REQUEST
 
     if not check_auth(post_):
-        return FORBIDDEN, 'Forbidden!'
-    
+        return 'Forbidden!', FORBIDDEN
+
     context['is_admin'] = post_.is_admin
     
-    handler = handlers[post_.method]
-    
-    code, response = handler().execute_request(post_.arguments, context, store)
-    
-    return code, response
+    return handler().execute_request(post_.arguments, context, store)
 
 
 class MainHTTPHandler(BaseHTTPRequestHandler):
@@ -303,7 +304,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             logging.info("%s: %s %s" % (self.path, data_string, context["request_id"]))
             if path in self.router:
                 try:
-                    code, response = self.router[path]({"body": request, "headers": self.headers}, context, self.store)
+                    response, code = self.router[path]({"body": request, "headers": self.headers}, context, self.store)
                 except Exception as e:
                     logging.exception(f"Unexpected error: %s" % e)
                     code = INTERNAL_ERROR
