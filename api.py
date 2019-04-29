@@ -43,18 +43,27 @@ class Field:
         self.required = required
         self.nullable = nullable
 
+    def __repr__(self):
+        return
+
     def validate_field(self, value):
         raise NotImplementedError('Not implemented <is_valid_field()> method')
     
     def validate(self, value):
-        if self.required and value is None:
-            raise ValueError('This field is required!')
-        
-        if not self.nullable and value == '':
-            raise ValueError('This field cannot be empty!')
 
-        self.validate_field(value)
-        
+        if value is None:
+            if self.required:
+                raise ValueError(f'{self.__class__} is required!')
+
+            if not self.nullable:
+                raise ValueError(f'{self.__class__} does not defined!')
+        else:
+
+            if not self.nullable and value == '':
+                raise ValueError(f'{self.__class__} cannot be empty!')
+
+            self.validate_field(value)
+
         return value
 
 
@@ -67,7 +76,7 @@ class CharField(Field):
 
 class ArgumentsField(Field):
     def validate_field(self, value):
-        if value is not None and not isinstance(value, dict):
+        if not isinstance(value, dict):
             raise TypeError('"ArgumentsField" must be <dict>!')
 
 
@@ -102,6 +111,7 @@ class DateField(Field):
 class BirthDayField(DateField, Field):
     def validate_field(self, value):
         super().validate_field(value)
+
         delta = datetime.datetime.now() - self.parse_date
         if delta.days / 365 > 70:
             raise ValueError('Age limit up to 70 years!')
@@ -153,8 +163,7 @@ class Request(metaclass=RequestMeta):
                 clean_value = field_instance.validate(params_value)
             except Exception as ex:
                 self.errors[field_name] = ex
-                logging.error(field_name)
-                logging.error(ex)
+                logging.error(f'{field_name} - {ex}')
             else:
                 self.cleaned_data[field_name] = clean_value
                 setattr(self, field_name, clean_value)
@@ -197,7 +206,7 @@ class MethodRequest(Request):
 
 def check_auth(request):
     if request.is_admin:
-        digest = hashlib.sha512((datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).encode(encoding='utf_8')).hexdigest()
+        digest = hashlib.sha512((datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).encode(encoding='utf8')).hexdigest()
     else:
         digest = hashlib.sha512((request.account + request.login + SALT).encode(encoding='utf_8')).hexdigest()
     print('digest:', digest)
@@ -215,8 +224,9 @@ class OnlineScoreHandler:
             return post_method.errors, INVALID_REQUEST
 
         clean_dict = post_method.cleaned_data
+
         if not self.check_non_empty_pairs(clean_dict):
-            return {k: 'null' for k, v in clean_dict.items() if not v}, INVALID_REQUEST
+            return post_method.errors.keys(), INVALID_REQUEST
         
         context['has'] = [k for k, v in clean_dict.items() if v]
         
@@ -231,8 +241,8 @@ class OnlineScoreHandler:
         )
 
         if context.get('is_admin'):
-            return 42, OK
-        return scores, OK
+            return {'score': 42}, OK
+        return {'score': scores}, OK
 
     def check_non_empty_pairs(self, d):
         if d.get('phone') and d.get('email') or \
@@ -320,7 +330,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             r = {"error": response or ERRORS.get(code, "Unknown Error"), "code": code}
         context.update(r)
         logging.info(context)
-        self.wfile.write(json.dumps(r).encode(encoding='utf_8'))
+        self.wfile.write(json.dumps(r).encode(encoding='utf8'))
         return
 
 
