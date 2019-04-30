@@ -53,14 +53,14 @@ class Field:
 
         if value is None:
             if self.required:
-                raise ValueError(f'{self.__class__} is required!')
+                raise ValueError('This field is required!')
 
             if not self.nullable:
-                raise ValueError(f'{self.__class__} does not defined!')
+                raise ValueError('This field does not defined!')
         else:
 
             if not self.nullable and value == '':
-                raise ValueError(f'{self.__class__} cannot be empty!')
+                raise ValueError('This field cannot be empty!')
 
             self.validate_field(value)
 
@@ -109,6 +109,7 @@ class DateField(Field):
 
 
 class BirthDayField(DateField, Field):
+
     def validate_field(self, value):
         super().validate_field(value)
 
@@ -131,6 +132,9 @@ class ClientIDsField(Field):
     
     @staticmethod
     def validate_array(array):
+        if not array:
+            raise ValueError('"ClientIDsField" has empty array!')
+
         for value in array:
             if not isinstance(value, int) or value < 0:
                 raise ValueError('"ClientIDsField" has invalid data array!')
@@ -146,7 +150,7 @@ class RequestMeta(type):
             else:
                 other_attrs[key] = value
         new_cls = super().__new__(cls, name, bases, other_attrs)
-        new_cls._fields_container = field_instances
+        new_cls.fields_container = field_instances
         return new_cls
 
 
@@ -157,13 +161,12 @@ class Request(metaclass=RequestMeta):
         self.errors = {}
 
     def validate_request(self):
-        for field_name, field_instance in self._fields_container.items():
+        for field_name, field_instance in self.fields_container.items():
             params_value = self.params.get(field_name)
             try:
                 clean_value = field_instance.validate(params_value)
             except Exception as ex:
-                self.errors[field_name] = ex
-                logging.error(f'{field_name} - {ex}')
+                self.errors[field_name] = ''.join(ex.args)
             else:
                 self.cleaned_data[field_name] = clean_value
                 setattr(self, field_name, clean_value)
@@ -208,8 +211,8 @@ def check_auth(request):
     if request.is_admin:
         digest = hashlib.sha512((datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).encode(encoding='utf8')).hexdigest()
     else:
-        digest = hashlib.sha512((request.account + request.login + SALT).encode(encoding='utf_8')).hexdigest()
-    print('digest:', digest)
+        digest = hashlib.sha512((request.account + request.login + SALT).encode(encoding='utf8')).hexdigest()
+    # print('digest:', digest)
     if digest == request.token:
         return True
     return False
@@ -226,9 +229,9 @@ class OnlineScoreHandler:
         clean_dict = post_method.cleaned_data
 
         if not self.check_non_empty_pairs(clean_dict):
-            return post_method.errors.keys(), INVALID_REQUEST
+            return "Checking non empty pairs failed!", INVALID_REQUEST
         
-        context['has'] = [k for k, v in clean_dict.items() if str(v) is True]
+        context['has'] = sorted([k for k, v in clean_dict.items() if self.true(v)])
         
         scores = scoring.get_score(
             store,
@@ -245,10 +248,15 @@ class OnlineScoreHandler:
         return {'score': scores}, OK
 
     def check_non_empty_pairs(self, d):
-        if d.get('phone') and d.get('email') or \
-                d.get('first_name') and d.get('last_name') or \
-                d.get('gender') and d.get('birthday'):
+        if self.true(d.get('phone')) and self.true(d.get('email')) or \
+                self.true(d.get('first_name')) and self.true(d.get('last_name')) or \
+                self.true(d.get('gender')) and self.true(d.get('birthday')):
             return d
+
+    @staticmethod
+    def true(value):
+        if value is not None and value != '':
+            return True
 
 
 class ClientsInterestsHandler:
