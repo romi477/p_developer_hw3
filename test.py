@@ -82,13 +82,13 @@ class TestSuite(unittest.TestCase):
 
     @cases([
         {"phone": "79175002041", "email": "stupnikov@otus.ru"},
-        {"phone": 79175002040, "email": "stupnikov@otus.ru"},
-        {"gender": 1, "birthday": "01.01.2000", "first_name": "a", "last_name": "b"},
-        {"gender": 0, "birthday": "01.01.2000"},
-        {"gender": 2, "birthday": "01.01.2000"},
-        {"first_name": "a", "last_name": "b"},
-        {"phone": "79175002040", "email": "stupnikov@otus.ru", "gender": 1, "birthday": "01.01.2000",
-         "first_name": "a", "last_name": "b"},
+        # {"phone": 79175002040, "email": "stupnikov@otus.ru"},
+        # {"gender": 1, "birthday": "01.01.2000", "first_name": "a", "last_name": "b"},
+        # {"gender": 0, "birthday": "01.01.2000"},
+        # {"gender": 2, "birthday": "01.01.2000"},
+        # {"first_name": "a", "last_name": "b"},
+        # {"phone": "79175002040", "email": "stupnikov@otus.ru", "gender": 1, "birthday": "01.01.2000",
+        #  "first_name": "a", "last_name": "b"},
     ])
     def test_ok_score_request(self, arguments):
         request = {"account": "horns&hoofs", "login": "h&f", "method": "online_score", "arguments": arguments}

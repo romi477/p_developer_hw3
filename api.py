@@ -228,7 +228,7 @@ class OnlineScoreHandler:
         if not self.check_non_empty_pairs(clean_dict):
             return post_method.errors.keys(), INVALID_REQUEST
         
-        context['has'] = [k for k, v in clean_dict.items() if v]
+        context['has'] = [k for k, v in clean_dict.items() if str(v) is True]
         
         scores = scoring.get_score(
             store,
