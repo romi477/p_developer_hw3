@@ -43,33 +43,25 @@ class Field:
         self.required = required
         self.nullable = nullable
 
-    def __repr__(self):
-        return
-
     def validate_field(self, value):
         raise NotImplementedError('Not implemented <is_valid_field()> method')
     
     def validate(self, value):
-
         if value is None:
             if self.required:
                 raise ValueError('This field is required!')
-
+            
             if not self.nullable:
                 raise ValueError('This field does not defined!')
         else:
-
             if not self.nullable and value == '':
                 raise ValueError('This field cannot be empty!')
-
             self.validate_field(value)
-
         return value
 
 
 class CharField(Field):
     def validate_field(self, value):
-  
         if not isinstance(value, str):
             raise TypeError('"CharField" must be <str>!')
 
@@ -120,7 +112,7 @@ class BirthDayField(DateField, Field):
 
 class GenderField(Field):
     def validate_field(self, value):
-        if value not in [UNKNOWN, MALE, FEMALE]:
+        if value not in [0, 1, 2]:
             raise ValueError('"GenderField" has incorrect value!')
 
 
@@ -212,7 +204,7 @@ def check_auth(request):
         digest = hashlib.sha512((datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).encode(encoding='utf8')).hexdigest()
     else:
         digest = hashlib.sha512((request.account + request.login + SALT).encode(encoding='utf8')).hexdigest()
-    # print('digest:', digest)
+    print('digest:', digest)
     if digest == request.token:
         return True
     return False
