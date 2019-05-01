@@ -59,7 +59,6 @@ Error:
             "gender": 1}
     }' http://127.0.0.1:8080/method/
     
-***   
 
     $curl -X POST -H "Content-Type: application/json" -d '{
         "account": "horns&hoofs", 
@@ -71,4 +70,9 @@ Error:
             "date": "20.07.2017"
             }
     }' http://127.0.0.1:8080/method/
+    
+***
 
+#### Запуск базовых тестов:
+
+    $ python -m unittest test.TestSuite

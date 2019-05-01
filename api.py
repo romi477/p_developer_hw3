@@ -204,7 +204,7 @@ def check_auth(request):
         digest = hashlib.sha512((datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).encode(encoding='utf8')).hexdigest()
     else:
         digest = hashlib.sha512((request.account + request.login + SALT).encode(encoding='utf8')).hexdigest()
-    print('digest:', digest)
+    # print('digest:', digest)
     if digest == request.token:
         return True
     return False
