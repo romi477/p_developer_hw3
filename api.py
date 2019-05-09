@@ -100,7 +100,7 @@ class DateField(Field):
             raise
 
 
-class BirthDayField(DateField, Field):
+class BirthDayField(DateField):
 
     def validate_field(self, value):
         super().validate_field(value)
@@ -166,10 +166,12 @@ class Request(metaclass=RequestMeta):
     def is_valid(self):
         return not self.errors
 
+    def show_errors(self):
+        return self.errors
+
     @classmethod
-    def data_init(cls, *args, **kwargs):
+    def from_data(cls, *args, **kwargs):
         class_instance = cls(*args, **kwargs)
-        class_instance.validate_request()
         return class_instance
 
 
@@ -210,20 +212,30 @@ def check_auth(request):
     return False
 
 
-class OnlineScoreHandler:
+class HandlerMixin:
+    model = None
+    post_method = None
+
+    def verification(self, arguments):
+        self.post_method = self.model.from_data(arguments)
+        self.post_method.validate_request()
+
+        return self.post_method.is_valid()
+
+
+class OnlineScoreHandler(HandlerMixin):
+    model = OnlineScoreRequest
 
     def execute_request(self, arguments, context, store):
-        post_method = OnlineScoreRequest.data_init(arguments)
+        if not self.verification(arguments):
+            return self.post_method.show_errors(), INVALID_REQUEST
 
-        if not post_method.is_valid():
-            return post_method.errors, INVALID_REQUEST
-
-        clean_dict = post_method.cleaned_data
+        clean_dict = self.post_method.cleaned_data
 
         if not self.check_non_empty_pairs(clean_dict):
             return "Checking non empty pairs failed!", INVALID_REQUEST
         
-        context['has'] = sorted([k for k, v in clean_dict.items() if self.true(v)])
+        context['has'] = sorted([k for k, v in clean_dict.items() if self.is_true(v)])
         
         scores = scoring.get_score(
             store,
@@ -240,28 +252,27 @@ class OnlineScoreHandler:
         return {'score': scores}, OK
 
     def check_non_empty_pairs(self, d):
-        if self.true(d.get('phone')) and self.true(d.get('email')) or \
-                self.true(d.get('first_name')) and self.true(d.get('last_name')) or \
-                self.true(d.get('gender')) and self.true(d.get('birthday')):
+        if self.is_true(d.get('phone')) and self.is_true(d.get('email')) or \
+                self.is_true(d.get('first_name')) and self.is_true(d.get('last_name')) or \
+                self.is_true(d.get('gender')) and self.is_true(d.get('birthday')):
             return d
 
     @staticmethod
-    def true(value):
+    def is_true(value):
         if value is not None and value != '':
             return True
 
 
-class ClientsInterestsHandler:
+class ClientsInterestsHandler(HandlerMixin):
+    model = ClientsInterestsRequest
 
     def execute_request(self, arguments, context, store):
-        post_method = ClientsInterestsRequest.data_init(arguments)
+        if not self.verification(arguments):
+            return self.post_method.show_errors(), INVALID_REQUEST
 
-        if not post_method.is_valid():
-            return post_method.errors, INVALID_REQUEST
+        context['nclients'] = len(self.post_method.client_ids)
 
-        context['nclients'] = len(post_method.client_ids)
-
-        interests_dict = {k: scoring.get_interests(store, k) for k in post_method.client_ids}
+        interests_dict = {k: scoring.get_interests(store, k) for k in self.post_method.client_ids}
 
         return interests_dict, OK
 
@@ -272,22 +283,23 @@ def method_handler(request, context, store):
         'clients_interests': ClientsInterestsHandler
     }
     
-    post_ = MethodRequest.data_init(request['body'])
+    incoming_query = MethodRequest.from_data(request['body'])
+    incoming_query.validate_request()
     
-    if not post_.is_valid():
-        return post_.errors, INVALID_REQUEST
-    
-    handler = handlers.get(post_.method)
+    if not incoming_query.is_valid():
+        return incoming_query.show_errors(), INVALID_REQUEST
+
+    handler = handlers.get(incoming_query.method)
     
     if not handler:
-        return 'Invalid request method!', INVALID_REQUEST
+        return f'Invalid request method: {incoming_query.method}', INVALID_REQUEST
 
-    if not check_auth(post_):
+    if not check_auth(incoming_query):
         return 'Forbidden!', FORBIDDEN
 
-    context['is_admin'] = post_.is_admin
+    context['is_admin'] = incoming_query.is_admin
     
-    return handler().execute_request(post_.arguments, context, store)
+    return handler().execute_request(incoming_query.arguments, context, store)
 
 
 class MainHTTPHandler(BaseHTTPRequestHandler):
